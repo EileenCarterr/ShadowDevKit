@@ -2,22 +2,23 @@ namespace ShadowDevKit.StateMachine
 {	
     public class StateMachine<T>
     {
+		public static readonly int INVALID_STATE_ID = -1;
+        public static readonly int FINAL_STATE_ID   = 1010;
+		
         private System.Collections.Generic.Dictionary<int, StateBase<T>> statesmap;
 
-        private StateBase<T> globalState; // generally global should be the one where entiry stops to exist
-
-        public static readonly int INVALID_STATE_ID = -1;
-        public static readonly int GLOBAL_STATE_ID  = 1010;
-
         private StateBase<T> currentState;
+
         private int currentStateIdx = -1;
         private int nextStateIdx    = -1;
         private int lastStateIdx    = -1;
 
-        private bool hasGlobalState  = false;
-        private bool isInGlobalState = false;
-        private System.Func<bool> globalStateTrigger = null; // global state condition callback, sm will switch
-															 // to global state as long as this will return true
+        private StateBase<T> finalState; // final should be the one where entiry stops to exist
+		private System.Func<bool> finalStateTrigger = null; // global state condition callback, sm will switch
+		// to global state as long as this will return true
+		
+        private bool hasFinalState  = false;
+        private bool isInFinalState = false;
 
         public StateBase<T> CurrentState { get { return currentState; } }
         public int CurrentStateIDX { get { return currentStateIdx; } }
@@ -31,16 +32,16 @@ namespace ShadowDevKit.StateMachine
             }
         }
 		
-        // cache
-        // internally used to keep track of transition
+        // others
         private bool shouldTransition = false;
-        private bool currentStateExited = false;
+		private Stopwatch stopWatch;
 
 
         // constructor
         public StateMachine(T owner)
         {
             this.Owner = owner;
+			stopWatch = new();
         }
 
         public void AddState(StateBase<T> newState, int idx)
@@ -51,75 +52,74 @@ namespace ShadowDevKit.StateMachine
             StatesMap[idx] = newState;
         }
 
-        public bool AddState(System.Action updateMethodCallback, int idx,
-    System.Func<bool> enterMethodCallback = null, System.Func<bool> exitMethodCallback = null)
+        public bool AddState(
+			string stateName,
+			int idx,
+			System.Action updateCallback,
+			System.Func<bool> enterCallback = null, System.Func<bool> exitCallback = null)
         {
-            PlaceholderState placeHolderState = new(Owner, enterMethodCallback, updateMethodCallback, exitMethodCallback);
+            StateBase<T> tempState = new(Owner, stateName, updateCallback, enterCallback, exitCallback);
 
-            if (!CanAddState(placeHolderState, idx))
+            if (!CanAddState(tempState, idx))
                 return false;
 
-            AddState(placeHolderState, idx);
+            AddState(tempState, idx);
             return true;
         }
 
-        public void AddGlobalState(StateBase<T> state, System.Func<bool> triggerMethodCallback)
+        public void AddFinalState(StateBase<T> state, System.Func<bool> triggerCallback)
         {
-            if (state == null || triggerMethodCallback == null)
+            if (state == null || triggerCallback == null)
             {
-#if UNITY_EDITOR
                 UnityEngine.Debug.LogWarning("Failed to add global state.");
-#endif
                 return;
             }
 
-            globalState = state;
-            this.globalStateTrigger = triggerMethodCallback;
-            hasGlobalState = true;
+            finalState = state;
+            finalStateTrigger = triggerCallback;			
+			StatesMap[FINAL_STATE_ID] = finalState;
+			
+            hasFinalState = true;
         }
 
-        public StateBase<T> AddGlobalState(
-            StateBase<T> state, System.Func<bool> triggerMethodCallback, System.Action update,
-            System.Func<bool> enter = null, System.Func<bool> exit = null)
+        public StateBase<T> AddFinalState(
+			string stateName,
+            StateBase<T> state,
+			System.Func<bool> triggerCallback,
+			System.Action updateCallback,
+            System.Func<bool> enterCallback = null, System.Func<bool> exitCallback = null)
         {
-            if (state == null || triggerMethodCallback == null)
+            if (state == null || triggerCallback == null)
             {
-#if UNITY_EDITOR
-                UnityEngine.Debug.LogWarning("Failed to add global state.");
-#endif
+                UnityEngine.Debug.LogWarning("Failed to add global state, state instance or triggerCallback is null.");
                 return null;
             }
 
-            PlaceholderState placeHolderState = new(Owner, enter, update, exit);
-            globalState = placeHolderState;
-            globalStateTrigger = triggerMethodCallback;
-            hasGlobalState = true;
-            return globalState;
+			finalState = new(Owner, stateName, updateCallback, enterCallback, exitCallback);
+            finalStateTrigger = triggerCallback;
+			StatesMap[FINAL_STATE_ID] = finalState;
+			
+            hasFinalState = true;
+            return finalState;
         }
 
         private bool CanAddState(StateBase<T> state, int idx)
         {
-            if(idx == INVALID_STATE_ID || idx < 0 || idx == GLOBAL_STATE_ID)
+			if (state == null)
             {
-#if UNITY_EDITOR
+                UnityEngine.Debug.LogWarningFormat("Unable to add state '{0}', value is null.", nameof(state));
+                return false;
+            }
+			
+            if(idx == INVALID_STATE_ID || idx == FINAL_STATE_ID)
+            {
                 UnityEngine.Debug.LogWarningFormat("Unable to add state '{0}', invalid state idx", nameof(state));
-#endif
                 return false;
             }
 
-            if (state == null || StatesMap.ContainsValue(state))
+            if (StatesMap.ContainsKey(idx))
             {
-#if UNITY_EDITOR
-                UnityEngine.Debug.LogWarningFormat("Unable to add state '{0}', either value already exists, or its null.", nameof(state));
-#endif
-                return false;
-            }
-
-            if (idx == INVALID_STATE_ID || StatesMap.ContainsKey(idx))
-            {
-#if UNITY_EDITOR
                 UnityEngine.Debug.LogWarningFormat("Unable to add state '{0}', key already exists.", idx);
-#endif
                 return false;
             }
 
@@ -127,28 +127,18 @@ namespace ShadowDevKit.StateMachine
         }
 
         public void SwitchState(int idx)
-        {
-			// make sure we are not in final state
-			if (currentStateIdx != INVALID_STATE_ID && currentStateIdx == GLOBAL_STATE_ID)
-			{
+        {			
+			if (idx == currentStateIdx ||
+				idx == INVALID_STATE_ID || 
+				idx == FINAL_STATE_ID)
 				return; 
-			}
 			
-            StateBase<T> newState;
-
             // make sure state exists
             if (!StatesMap.ContainsKey(idx))
             {
-#if UNITY_EDITOR
                 UnityEngine.Debug.LogWarningFormat("Unable to switch state; state {0} does not exits.!", nameof(idx));
-#endif
                 return;
             }
-
-            newState = StatesMap[idx];
-
-            if (currentStateIdx == idx)
-                return;
 
             this.nextStateIdx = idx;
             shouldTransition = true;
@@ -160,44 +150,64 @@ namespace ShadowDevKit.StateMachine
         /// </summary>
         public void SwitchToLastState()
         {
-            if (lastStateIdx != -1)
+            if (lastStateIdx != INVALID_STATE_ID)
                 SwitchState(lastStateIdx);
         }
-
+		
+		private bool enterMethodExec_ = false;
+		private bool exitMethodExec_  = false;
+		
         private void Transition()
-        {
-            if (!IsOK())
-                return;
+        {			
+			// 1.
+			if (nextStateIdx != FINAL_STATE_ID && !exitMethodExec_) {
+				stopWatch.Begin();
+				exitMethodExec_ = true;
+			}
+			
+            if (nextStateIdx != FINAL_STATE_ID && currentState != null && !currentState.Exit()) {
+				return;
+			}
+			
+			// 2.
+			if (nextStateIdx != currentStateIdx) {
 
-            if (!currentStateExited && currentState != null && !currentState.Exit())
-                return;
-
-            currentStateExited = true;
-            lastStateIdx = currentStateIdx;
-            currentStateIdx = nextStateIdx;
-            currentState = StatesMap[currentStateIdx];
-
+				lastStateIdx    = currentStateIdx;
+				currentStateIdx = nextStateIdx;
+				currentState    = StatesMap[currentStateIdx];
+			}
+			
+			// 3.
+			if (!enterMethodExec_) {
+				stopWatch.Begin();
+				enterMethodExec_ = true;
+			}
             if (!currentState.Enter())
                 return;
-
-            currentStateExited = false;
+			
+			// 4.
             shouldTransition = false;
+	
+			enterMethodExec_ = false;
+			exitMethodExec_  = false;
+			
+			stopWatch.Begin();
         }
 
         public void Update()
         {
-            if (hasGlobalState && globalStateTrigger())
+            if (hasFinalState && finalStateTrigger())
             {
-                if(!isInGlobalState)
+                if(!isInFinalState)
                 {
                     // same logic as in switch state
-                    isInGlobalState = true;
-                    nextStateIdx = GLOBAL_STATE_ID;
+                    isInFinalState = true;
+                    nextStateIdx = FINAL_STATE_ID;
                     shouldTransition = true;
                 }
             }
 
-            if (currentStateIdx != -1 && !shouldTransition)
+            if (currentStateIdx != INVALID_STATE_ID && !shouldTransition)
 			{
 				currentState.Update();
 			}
@@ -206,19 +216,17 @@ namespace ShadowDevKit.StateMachine
                 Transition();
 			}
         }
-
-        private bool IsOK()
-        {
-            return UnityEngine.Application.isPlaying;
-        }
-
-        private class PlaceholderState : StateBase<T>
-        {
-            public PlaceholderState(T owner, System.Func<bool> enter, System.Action update,
-                System.Func<bool> exit) :
-                base(owner, enter, update, exit)
-            {
-            }
-        }
+		
+		public float Duration() => stopWatch.GetSeconds();
+		
+		public string GetExecInfo()
+		{ 
+			if(enterMethodExec_)
+				return string.Format("CurrentState: {0} Method: Enter",  currentState);
+			else if(exitMethodExec_)
+				return string.Format("CurrentState: {0} Method: Exit",   currentState);
+			else
+				return string.Format("CurrentState: {0} Method: Update", currentState);
+		}
     }
 }
