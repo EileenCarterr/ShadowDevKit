@@ -1,9 +1,8 @@
 using UnityEngine;
 
-
 namespace ShadowDevKit.StateMachineDemo
 {
-    using ShadowDevKit.StateMachine;
+    using ShadowDevKit.AI;
 
     public class PatrolState<T> : StateBase<T> where T : StateMachineDemo
     {
