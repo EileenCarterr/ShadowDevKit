@@ -1,7 +1,6 @@
 using System;
 using UnityEngine;
 
-
 namespace ShadowDevKit
 {
 	public class Stopwatch

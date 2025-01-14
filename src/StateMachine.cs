@@ -1,4 +1,4 @@
-namespace ShadowDevKit.StateMachine
+namespace ShadowDevKit.AI
 {	
     public class StateMachine<T>
     {
@@ -20,9 +20,9 @@ namespace ShadowDevKit.StateMachine
         private bool hasFinalState  = false;
         private bool isInFinalState = false;
 
+        public T Owner  { get; private set; }
         public StateBase<T> CurrentState { get { return currentState; } }
         public int CurrentStateIDX { get { return currentStateIdx; } }
-        public T Owner  { get; private set; }
         public System.Collections.Generic.Dictionary<int, StateBase<T>> StatesMap
         {
             get 
@@ -218,6 +218,8 @@ namespace ShadowDevKit.StateMachine
         }
 		
 		public float Duration() => stopWatch.GetSeconds();
+		
+		public bool IsInTransition() => !exitMethodExec_;
 		
 		public string GetExecInfo()
 		{ 

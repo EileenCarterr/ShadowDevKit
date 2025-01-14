@@ -1,6 +1,6 @@
 using System.Reflection;
 
-namespace ShadowDevKit.StateMachine
+namespace ShadowDevKit.AI
 {
     public class StateBase<T>
     {
