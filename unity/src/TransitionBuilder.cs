@@ -43,13 +43,40 @@ namespace ShadowDevKit.AI
 				{
 					var transitions = transitionsMap[shadowAIEntity.GetCurrentState()];
 					
-                    foreach (var transition in transitions)
-                    {
-                        if (Array.TrueForAll(transition.Conditions, element => element() == true))
-                        {
-                            return transition.ToState;
-                        }
-                    }
+					float maxScore = float.MinValue;
+					Transition<TState> bestTransition = null;
+
+					// Evaluate each transition
+					foreach (var transition in transitions)
+					{
+						float totalScore = 0;
+
+						// Sum up the utility scores from all conditions
+						foreach (var condition in transition.Conditions)
+						{
+							totalScore += condition();
+						}
+						
+						// Normalize the total score
+						if (transition.Conditions.Length > 0)
+							totalScore /= transition.Conditions.Length;
+						
+						// Track the transition with the highest score
+						if (totalScore > maxScore)
+						{
+							maxScore = totalScore;
+							bestTransition = transition;
+						}
+						
+						totalScore /= transition.Conditions.Length;
+					}
+					
+					// Return the state of the best transition if one exists
+					if (bestTransition != null)
+					{
+						Debug.Log($"Transitioning from {bestTransition.FromState} to {bestTransition.ToState} with score {maxScore}");
+						return bestTransition.ToState;
+					}
 				}
 
 				Debug.LogWarning($"No valid transitions found for state: {shadowAIEntity.GetCurrentState()}");
@@ -123,7 +150,7 @@ namespace ShadowDevKit.AI
             public TransitionBlock Default(TState state)
             {				
 				_ = new TransitionConditionBuilder(_fromState, state, this, _transitionBlock)
-						.Conditions( () => true );
+						.Conditions( () => 1 );
 						
 				return _transitionBlock;
             }
@@ -144,7 +171,7 @@ namespace ShadowDevKit.AI
                 _transitionBlock = transitionBlock;
             }
 
-            public TransitionToBuilder Conditions(params Func<bool>[] conditions)
+            public TransitionToBuilder Conditions(params Func<float>[] conditions)
             {
                 _transitionBlock.GetTransitions().Add(new Transition<TState>(_fromState, _toState, conditions));
                 return _parentBuilder; // Allows chaining of To statements
@@ -155,9 +182,9 @@ namespace ShadowDevKit.AI
 		{
 			public SState FromState { get; }
 			public SState ToState { get; }
-			public Func<bool>[] Conditions { get; }
+			public Func<float>[] Conditions { get; }
 
-			public Transition(SState fromState, SState toState, Func<bool>[] conditions)
+			public Transition(SState fromState, SState toState, Func<float>[] conditions)
 			{
 				FromState = fromState;
 				ToState = toState;
